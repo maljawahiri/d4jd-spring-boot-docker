@@ -21,7 +21,7 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<java.version>1.8</java.version>
-		<!--set this to your docker acct name-->
+		<!--set this to your docker account name-->
 		<docker.image.prefix>d4jd</docker.image.prefix>
 		<!--Set to name of project-->
 		<docker.image.name>springbootdocker</docker.image.name>
