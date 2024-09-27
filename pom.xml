@@ -5,7 +5,7 @@
 
 	<groupId>guru.springframework</groupId>
 	<artifactId>spring-boot-docker</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.0.10-SNAPSHOT</version>
 	<packaging>jar</packaging>
 
 	<name>spring-boot-docker</name>
@@ -21,9 +21,19 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<java.version>1.8</java.version>
+		<!--set this to your docker account name-->
+		<docker.image.prefix>d4jd</docker.image.prefix>
+		<!--Set to name of project-->
+		<docker.image.name>springbootdocker</docker.image.name>
+		<docker.startParallel>true</docker.startParallel>
 	</properties>
 
 	<dependencies>
+        <dependency>
+            <groupId>guru.springframework</groupId>
+            <artifactId>page-view-client</artifactId>
+            <version>0.0.3</version>
+        </dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-thymeleaf</artifactId>
@@ -32,10 +42,13 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
-
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-devtools</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
 		<!--testing deps-->
@@ -48,12 +61,215 @@
 	
 	<build>
 		<plugins>
+
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+
+			<plugin>
+				<groupId>io.fabric8</groupId>
+				<artifactId>docker-maven-plugin</artifactId>
+				<version>0.40.2</version>
+
+				<configuration>
+
+					<dockerHost>http://127.0.0.1:2375</dockerHost>
+					<!--<dockerHost>unix:///var/run/docker.sock</dockerHost>-->
+
+					<verbose>true</verbose>
+					<images>
+
+						<image>
+							<name>${docker.image.prefix}-${docker.image.name}</name>
+							<build>
+								<dockerFileDir>${project.basedir}/target/dockerfile/</dockerFileDir>
+								<!--copies artifact to docker build dir in target-->
+								<assembly>
+									<descriptorRef>artifact</descriptorRef>
+								</assembly>
+								<tags>
+									<tag>latest</tag>
+									<tag>${project.version}</tag>
+								</tags>
+							</build>
+							<run>
+								<ports>
+									<port>8080:8080</port>
+								</ports>
+								<links>
+									<link>rabbitmqsrv:rabbitmqsrv</link>
+								</links>
+								<env>
+									<SPRING_RABBITMQ_HOST>rabbitmqsrv</SPRING_RABBITMQ_HOST>
+								</env>
+								<dependsOn>
+									<container>rabbitmqsrv</container>
+									<container>pageviewservice</container>
+								</dependsOn>
+								<wait>
+									<!--
+									TODO: healthcheck seems to be executed too fast and fails
+									<http>
+										<url>http://localhost:8080/health</url>
+										<method>GET</method>
+										<status>200..399</status>
+									</http>
+									-->
+									<time>5000</time>
+								</wait>
+							</run>
+						</image>
+
+						<!--mysql container-->
+						<image>
+							<alias>mysqldb</alias>
+							<name>mysql:5.7</name>
+							<run>
+								<ports>
+									<port>3306:3306</port>
+								</ports>
+								<volumes>
+									<bind>
+										<volume>/c/tmp/docker/mysql/pageviewservice:/var/lib/mysql</volume>
+									</bind>
+								</volumes>
+								<!--set env prams for mysql image-->
+								<env>
+									<MYSQL_DATABASE>pageviewservice</MYSQL_DATABASE>
+									<MYSQL_ALLOW_EMPTY_PASSWORD>yes</MYSQL_ALLOW_EMPTY_PASSWORD>
+								</env>
+								<!--wait for db to start-->
+								<wait>
+									<time>3000</time>
+								</wait>
+							</run>
+						</image>
+
+						<!--rabbit container-->
+						<image>
+							<alias>rabbitmqsrv</alias>
+							<name>rabbitmq:management</name>
+							<run>
+								<hostname>rabbitmqsrv</hostname>
+								<ports>
+									<port>5672</port>
+									<port>15672</port>
+								</ports>
+								<volumes>
+									<bind>
+										<volume>/c/tmp/docker/rabbitmq:/var/lib/rabbitmq</volume>
+									</bind>
+								</volumes>
+								<!--wait for db to start-->
+								<wait>
+									<time>3000</time>
+								</wait>
+							</run>
+						</image>
+
+						<!-- pageviewservice -->
+						<image>
+							<alias>pageviewservice</alias>
+							<name>d4jd-pageviewservice</name>
+							<run>
+								<ports>
+									<port>8081:8081</port>
+								</ports>
+								<links>
+									<link>rabbitmqsrv:rabbitmqsrv</link>
+									<link>mysqldb:mysqldb</link>
+								</links>
+								<env>
+									<SPRING_DATASOURCE_URL>jdbc:mysql://mysqldb:3306/pageviewservice?enabledTLSProtocols=TLSv1.2</SPRING_DATASOURCE_URL>
+									<SPRING_PROFILES_ACTIVE>mysql</SPRING_PROFILES_ACTIVE>
+									<SPRING_RABBITMQ_HOST>rabbitmqsrv</SPRING_RABBITMQ_HOST>
+								</env>
+								<dependsOn>
+									<container>rabbitmqsrv</container>
+									<container>mysqldb</container>
+								</dependsOn>
+								<wait>
+									<!--
+									TODO: healthcheck seems to be executed too fast and fails
+									<http>
+										<url>http://localhost:8081/actuator/health</url>
+										<method>GET</method>
+										<status>200..399</status>
+									</http>
+									-->
+									<time>5000</time>
+								</wait>
+							</run>
+						</image>
+
+					</images>
+				</configuration>
+
+				<executions>
+					<execution>
+						<id>start</id>
+						<phase>pre-integration-test</phase>
+						<goals>
+							<goal>build</goal>
+							<goal>start</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>stop</id>
+						<phase>post-integration-test</phase>
+						<goals>
+							<goal>stop</goal>
+						</goals>
+					</execution>
+				</executions>
+
+			</plugin>
+
+			<plugin>
+				<groupId>org.codehaus.gmavenplus</groupId>
+				<artifactId>gmavenplus-plugin</artifactId>
+				<version>2.1.0</version>
+				<executions>
+					<execution>
+						<phase>prepare-package</phase>
+						<goals>
+							<goal>execute</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<scripts>
+						<script>file:///${project.basedir}/src/main/scripts/BuildDockerfile.groovy</script>
+					</scripts>
+				</configuration>
+				<dependencies>
+					<dependency>
+						<groupId>org.codehaus.groovy</groupId>
+						<artifactId>groovy-all</artifactId>
+						<version>3.0.13</version>
+						<type>pom</type>
+						<scope>runtime</scope>
+					</dependency>
+				</dependencies>
+			</plugin>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<version>2.22.2</version>
+				<executions>
+					<execution>
+						<id>integration-test</id>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+
 		</plugins>
 	</build>
-	
 
 </project>
